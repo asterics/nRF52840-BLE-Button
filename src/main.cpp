@@ -11,15 +11,23 @@
 
 
 #include <Arduino.h>
-#include <bluefruit.h>
+#include <bluefruit.h> 
 
 // Note: P0.15 is connected to the built-in red led
 #define LED PIN_015 
 #define LED_RED LED
 
-// ASCII-key action for each button
+#define ENABLE_ACTIVITY_LED 1
+#define ENABLE_DEBUG_OUTPUT 1
+
+// sleep configuration
+#define SLEEP_TIMEOUT_MS 10000  // Sleep after 10 seconds of inactivity
+unsigned long lastActivityTime = 0;
+bool sleepMode = false;
+
+// define ASCII-key action for each button
 #define NUM_BUTTONS 5
-uint8_t button_map[NUM_BUTTONS] = {PIN_017, PIN_020, PIN_022, PIN_024, PIN_025};
+uint8_t button_map[NUM_BUTTONS] = {PIN_017, PIN_020, PIN_022, PIN_024, PIN_100};
 uint8_t key_map[NUM_BUTTONS] = {' ', '\n', '1', '2', '3'};
 uint8_t buttonStates = 0;
 
@@ -36,6 +44,29 @@ BLEDis bledis;
 BLEHidAdafruit blehid;
 
 
+void enterSleepMode() {
+  if (ENABLE_DEBUG_OUTPUT) Serial.println("Entering sleep mode...");
+  sleepMode = true;
+  
+  // Configure all button pins as wakeup sources with pullup
+  for (uint8_t i = 0; i < NUM_BUTTONS; i++) {
+    // Set pin as wake source (low level trigger)
+    NRF_GPIO->PIN_CNF[button_map[i]] = (GPIO_PIN_CNF_SENSE_Low << GPIO_PIN_CNF_SENSE_Pos) |
+                                       (GPIO_PIN_CNF_DRIVE_S0S1 << GPIO_PIN_CNF_DRIVE_Pos) |
+                                       (GPIO_PIN_CNF_PULL_Pullup << GPIO_PIN_CNF_PULL_Pos) |
+                                       (GPIO_PIN_CNF_INPUT_Connect << GPIO_PIN_CNF_INPUT_Pos) |
+                                       (GPIO_PIN_CNF_DIR_Input << GPIO_PIN_CNF_DIR_Pos);
+  }
+  
+  // Turn off LED to save power
+  if (ENABLE_ACTIVITY_LED) digitalWrite(LED, LOW); 
+  
+  // Put nRF52 into low power mode
+  sd_power_system_off();
+  // This line won't be reached as system_off() causes a reset
+}
+
+
 // Convert ASCII to HID keycode & modifier (subset)
 uint8_t asciiToKeycode(uint8_t ch, uint8_t &outMod) {
   outMod = 0;
@@ -48,18 +79,15 @@ uint8_t asciiToKeycode(uint8_t ch, uint8_t &outMod) {
   return 0; // unsupported
 }
 
-void rebuildAndSendReport() {
-  blehid.keyboardReport(modifiers, active_keys);
-}
 
-bool addActive(uint8_t keycode) {
+bool addActiveKey(uint8_t keycode) {
   if (!keycode) return false;
   for (uint8_t i=0;i<6;i++) if (active_keys[i] == keycode) return false; // already
   for (uint8_t i=0;i<6;i++) if (active_keys[i] == 0) { active_keys[i] = keycode; return true; }
   return false; // full
 }
 
-bool removeActive(uint8_t keycode) {
+bool removeActiveKey(uint8_t keycode) {
   bool removed = false;
   for (uint8_t i=0;i<6;i++) if (active_keys[i] == keycode) { active_keys[i] = 0; removed = true; }
   return removed;
@@ -96,16 +124,29 @@ void startAdv(void)
 
 void setup() 
 {
-  Serial.begin(115200);  // note: the USB CDC serial port is not only useful for debugging
+  if (ENABLE_DEBUG_OUTPUT) {
+    Serial.begin(115200);  // note: the USB CDC serial port is not only useful for debugging
                          // but also for resetting the nRF52 when uploading code via the bootloader
 
-  // while ( !Serial ) delay(10);   // wait until Serial is connected 
-  // Serial.println("Tenstar nRF52840 BLE Keyboard Demo ready!");
+    // while ( !Serial ) delay(10);   // wait until Serial is connected 
+    Serial.println("Tenstar nRF52840 BLE Keyboard Demo ready!");
+  }
 
   for ( uint8_t i=0; i<NUM_BUTTONS; i++ ) {
     pinMode( button_map[i], INPUT_PULLUP );
   }
 
+  
+  // Get MAC address and create unique name
+  uint8_t mac[6];
+  Bluefruit.getAddr(mac);
+  
+  // Create name with last 4 hex digits of MAC
+  String deviceName = "AstericsHID";
+  deviceName += String(mac[4], HEX);
+  deviceName += String(mac[5], HEX);
+  
+  Bluefruit.setName(deviceName.c_str());
   Bluefruit.begin();
   Bluefruit.setTxPower(4);    // Check bluefruit.h for supported values
 
@@ -123,9 +164,6 @@ void setup()
    */
   blehid.begin();
 
-  // Set callback for set LED from central
-  // blehid.setKeyboardLedCallback(set_keyboard_led);
-
   /* Set connection interval (min, max) to your perferred value.
    * Note: It is already set by BLEHidAdafruit::begin() to 11.25ms - 15ms
    * min = 9*1.25=11.25 ms, max = 12*1.25= 15 ms 
@@ -134,36 +172,53 @@ void setup()
 
   // Set up and start advertising
   startAdv();
-  pinMode(LED, OUTPUT); //Set the LED to output mode.
+  if (ENABLE_ACTIVITY_LED) {
+    pinMode(LED, OUTPUT); //Set the LED to output mode.
+    digitalWrite(LED, HIGH);  // Turn on LED
+  }
+
+  lastActivityTime = millis();  // initialize activity timer
 }
 
 void loop() 
 {
+
   for ( uint8_t i=0; i<NUM_BUTTONS; i++ ) {
+
     bool pressed = ( digitalRead( button_map[i] ) == LOW );
+    
     if ( pressed && !(buttonStates & (1 << i)) ) {
       // button just pressed
+      lastActivityTime = millis();
       buttonStates |= (1 << i);
       uint8_t mod=0; uint8_t kc = asciiToKeycode(key_map[i], mod);
       if (kc) {
         modifiers |= mod; // add modifier bits
-        addActive(kc);
-        rebuildAndSendReport();
-        digitalToggle(LED);
+        addActiveKey(kc);
+        blehid.keyboardReport(modifiers, active_keys);
+        // if (ENABLE_ACTIVITY_LED ) digitalToggle(LED);
       }
     } else if ( !pressed && (buttonStates & (1 << i)) ) {
       // button just released
+      lastActivityTime = millis();
       buttonStates &= ~(1 << i);
       uint8_t mod=0; uint8_t kc = asciiToKeycode(key_map[i], mod);
       if (kc) {
-        removeActive(kc);
+        removeActiveKey(kc);
         // naive modifier cleanup: clear shift if no uppercase keys remain
         if (mod && mod == KEYBOARD_MODIFIER_LEFT_SHIFT) modifiers &= ~KEYBOARD_MODIFIER_LEFT_SHIFT;
-        rebuildAndSendReport();
-        digitalToggle(LED);
+        blehid.keyboardReport(modifiers, active_keys);
+        //if (ENABLE_ACTIVITY_LED ) digitalToggle(LED);
       }
     }
   }
-  delay (10);
+
+  //  __WFI(); // wait for interrupt - safe power until a button is pressed/released - did not work as expected here
+
+  // Check for sleep timeout
+  if (millis() - lastActivityTime  > SLEEP_TIMEOUT_MS) enterSleepMode();
+  
+  delay(20);  // main loop polling @50Hz
+
 }
 
