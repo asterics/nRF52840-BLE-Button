@@ -1,6 +1,6 @@
 # Bleeny: an nRF52840-based low cost BLE Button
 
-The BleenyButton is an assistive switch for creating a key press or other HID activities using Bluetooth Lwo Engergy (BLE). It utilizes the the affordable Tenstar Robot devboard (aka nice!nano) with the Nordic nrf52840 microcontroller. A good summary of the features of this SoC/board is provided at the [Zephyr documentation page](https://docs.zephyrproject.org/latest/boards/others/promicro_nrf52840/doc/index.html). The source code builds with PlatformIO, using the Adafruit nRF52 and Bluefruit libraries. The code is based upon the [BLE keyboard example](https://github.com/adafruit/Adafruit_nRF52_Arduino/blob/master/libraries/Bluefruit52Lib/examples/Peripheral/blehid_keyboard/blehid_keyboard.ino)
+The Bleeny Button is an assistive switch for creating a key press or other HID activities using Bluetooth Low Energy (BLE). It can be used to control SmartPhones, Tablets, Computers or AAC Software like our free and open source [Asterics AAC](https://aac.asterics.eu). The Bleeny Button utilizes the affordable Tenstar Robot devboard (aka nice!nano) with the Nordic nrf52840 microcontroller. A good summary of the features of this SoC/board is provided at the [Zephyr documentation page](https://docs.zephyrproject.org/latest/boards/others/promicro_nrf52840/doc/index.html). The source code builds with PlatformIO, using the Adafruit nRF52 and Bluefruit libraries. The code is based upon the [BLE keyboard example](https://github.com/adafruit/Adafruit_nRF52_Arduino/blob/master/libraries/Bluefruit52Lib/examples/Peripheral/blehid_keyboard/blehid_keyboard.ino)
 
 ## Requirements
 
@@ -10,8 +10,8 @@ The BleenyButton is an assistive switch for creating a key press or other HID ac
 ## Usage
 
 * build and upload the demo code (note that the Serial USB CDC interface must be enabled in the code in order to use the auto-upload via DFU in PlatformIO)
-* pair the BLE device (nrf52840)
-* connect up to 5 pushbuttons from GPIO pins 017, 020, 022, 024 and 100 to GND
+* pair the BLE device (e.g. Bleeny-214D, the unique number is composed from the mac address of your device) 
+* attach a pushbuttons to GPIO pin 017 and GND (optionally, more buttons can be connected to pins 020, 022, 024 and 100) 
 * when pressed, the buttons shall trigger keys (default settings are: `SPACE` , `ENTER`, `1`, `2` and `3`)
 
 ### Notes regarding low power operation / current consumption
